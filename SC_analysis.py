@@ -338,7 +338,69 @@ avg_mae_cost = np.mean(mae_scores_cost)
 avg_r2_cost = np.mean(r2_scores_cost)
 
 #print the average metrics
+print("\n" + "="*60)
+print("COST OPTIMIZATION - PREVISIONE COSTI DI PRODUZIONE")
+print("="*60)
 print(f"Average MSE for Cost Optimization (% of target range): {avg_mse_cost:.2f}%")
 print(f"Average RMSE for Cost Optimization (% of target range): {avg_rmse_cost:.2f}%")
 print(f"Average MAE for Cost Optimization (% of target range): {avg_mae_cost:.2f}%")
 print(f"Average R2 for Cost Optimization: {avg_r2_cost:.2f}%")
+
+# Addestra il modello finale su tutti i dati per fare previsioni
+scaler.fit(X_cost)
+X_cost_scaled = scaler.transform(X_cost)
+
+final_model = create_model()
+final_model.fit(X_cost_scaled, y_cost, epochs=100, batch_size=32, verbose=0)
+
+# Fai previsioni dei costi per tutti i prodotti
+supply_data['Predicted Manufacturing Costs'] = final_model.predict(X_cost_scaled, verbose=0)
+
+# Mostra confronto tra costi reali e previsti
+print("\nConfronto Costi Reali vs Previsti (primi 10 prodotti):")
+cost_comparison = supply_data[['SKU', 'Production volumes', 'Manufacturing costs', 'Predicted Manufacturing Costs']].head(10)
+cost_comparison['Differenza'] = cost_comparison['Predicted Manufacturing Costs'] - cost_comparison['Manufacturing costs']
+print(cost_comparison.to_string(index=False))
+
+# Statistiche generali
+print(f"\nCosto Medio Reale: ${supply_data['Manufacturing costs'].mean():.2f}")
+print(f"Costo Medio Previsto: ${supply_data['Predicted Manufacturing Costs'].mean():.2f}")
+
+# Grafico a barre affiancate per ogni SKU (primi 15 per leggibilità)
+cost_plot_data = supply_data[['SKU', 'Manufacturing costs', 'Predicted Manufacturing Costs']].head(15)
+
+plt.figure(figsize=(14, 6))
+x = np.arange(len(cost_plot_data))
+width = 0.35
+
+plt.bar(x - width/2, cost_plot_data['Manufacturing costs'], width, label='Costi Reali', color='#636EFA')
+plt.bar(x + width/2, cost_plot_data['Predicted Manufacturing Costs'], width, label='Costi Previsti', color='#EF553B')
+
+plt.xlabel('SKU')
+plt.ylabel('Costi di Produzione ($)')
+plt.title('Costi di Produzione: Reali vs Previsti per SKU')
+plt.xticks(x, cost_plot_data['SKU'], rotation=45)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# best SKU with lower predicted costs than real costs
+better_costs = cost_comparison[cost_comparison['Differenza'] < 0]
+print("\nSKU con Costi Previsti Inferiori ai Costi Reali:")
+print(better_costs[['SKU', 'Differenza']].to_string(index=False))
+
+# find the SKU with the highest cost savings
+min_production_volume = supply_data['Production volumes'].min()
+max_production_volume = 1000
+step_size = 100
+
+cheapest_cost = float('inf')
+best_volume = None
+for volume in range(min_production_volume, max_production_volume + 1, step_size):
+    normalized_production_volume = scaler.transform(np.array([[volume]]))
+    predicted_cost = final_model.predict(normalized_production_volume)
+
+    if predicted_cost[0][0] < cheapest_cost:
+        cheapest_cost = predicted_cost[0][0]
+        best_volume = volume
+print(f"\nVolume di Produzione Ottimale per Costi Minimi: {best_volume} unità con costo previsto di ${cheapest_cost:.2f}")
